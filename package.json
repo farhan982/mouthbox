@@ -1,0 +1,10 @@
+{
+  "name": "mouthbox",
+  "private": true,
+  "type": "module",
+  "description": "Static app; package.json exists so the DSP tests can run as ES modules under node.",
+  "scripts": {
+    "test": "node tests/pipeline.mjs",
+    "start": "python3 serve.py 8940"
+  }
+}

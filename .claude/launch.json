@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "mouthbox",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["serve.py", "8940"],
+      "port": 8940
+    }
+  ]
+}

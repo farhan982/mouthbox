@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- Same reasoning as the other projects here: no viewport-fit=cover and no
+     black-translucent, so iOS reserves the status bar itself instead of
+     needing env(safe-area-inset-*) to undo a full-bleed layout. -->
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0b0c10">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Mouthbox">
+<!-- Relative paths so this works from a GitHub Pages subpath too. -->
+<link rel="manifest" href="./manifest.json">
+<title>Mouthbox</title>
+<link rel="stylesheet" href="./assets/styles.css">
+</head>
+<body>
+<div id="app"></div>
+<noscript>Mouthbox needs JavaScript and a microphone.</noscript>
+<script type="module" src="./src/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+{
+  "name": "Mouthbox",
+  "short_name": "Mouthbox",
+  "description": "Beatbox a phrase and get a playable kit and sequence back.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0b0c10",
+  "theme_color": "#0b0c10"
+}
