@@ -76,7 +76,14 @@ export function pickOnsets(env, { sensitivity = 0.5, minGapMs = 50 } = {}) {
   if (!n) return [];
 
   const minGap = Math.max(1, Math.round((minGapMs / 1000) * env.frameRate));
-  const windowFrames = Math.max(4, Math.round(0.35 * env.frameRate));
+
+  // The threshold window has to be wide enough that a sustained sound cannot
+  // dominate it. At ±0.35 s a single 0.4 s breath filled over half the window,
+  // dragged the local median up, and masked the real hits either side of it —
+  // so breathing made the detector go deaf rather than adding false hits.
+  // At ±0.9 s a breath is a minor contributor and the median still tracks
+  // genuine changes in dynamics.
+  const windowFrames = Math.max(4, Math.round(0.9 * env.frameRate));
   // Calibrated against tests/pipeline.mjs: at the midpoint this has to reject
   // the secondary flux peak a pitched kick throws as it sweeps down, without
   // losing quiet hats. Lower settings keep those extra peaks on purpose.
@@ -88,6 +95,11 @@ export function pickOnsets(env, { sensitivity = 0.5, minGapMs = 50 } = {}) {
   for (let i = 0; i < n; i++) if (flux[i] > peak) peak = flux[i];
   const floor = peak * (0.015 + sensitivity * 0.16);
 
+  // Each onset carries how hard it was, normalised against the strongest in
+  // the take. This is the one measurement that reliably separates a struck
+  // sound from a wash of breath: the per-slice timbre features overlap badly
+  // (a kick and an inhale can share a crest factor), but a real hit always
+  // produces a far bigger jump in the detection function.
   const onsets = [];
   let last = -Infinity;
 
@@ -103,15 +115,21 @@ export function pickOnsets(env, { sensitivity = 0.5, minGapMs = 50 } = {}) {
 
     if (i - last < minGap) {
       // Two detections inside one hit: keep the stronger.
-      if (onsets.length && v > flux[onsets[onsets.length - 1]]) {
-        onsets[onsets.length - 1] = i;
+      if (onsets.length && v > onsets[onsets.length - 1].raw) {
+        onsets[onsets.length - 1] = { frame: i, raw: v };
         last = i;
       }
       continue;
     }
 
-    onsets.push(i);
+    onsets.push({ frame: i, raw: v });
     last = i;
+  }
+
+  let strongest = 0;
+  for (const onset of onsets) if (onset.raw > strongest) strongest = onset.raw;
+  for (const onset of onsets) {
+    onset.strength = strongest > 0 ? onset.raw / strongest : 0;
   }
 
   return onsets;

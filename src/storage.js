@@ -6,9 +6,14 @@
  */
 
 const DB_NAME = 'mouthbox';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const KITS = 'kits';
 const SETTINGS = 'settings';
+
+// Raw performance audio lives in its own store. A song-length take runs to
+// tens of megabytes, and the kit record is rewritten on a debounce every time
+// a slider moves — rewriting the audio alongside it would be ruinous.
+const TAKES = 'takes';
 
 let dbPromise = null;
 
@@ -23,6 +28,9 @@ function open() {
       }
       if (!db.objectStoreNames.contains(SETTINGS)) {
         db.createObjectStore(SETTINGS);
+      }
+      if (!db.objectStoreNames.contains(TAKES)) {
+        db.createObjectStore(TAKES, { keyPath: 'id' });
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -62,6 +70,20 @@ export function listKits() {
 
 export function deleteKit(id) {
   return transact(KITS, 'readwrite', (store) => store.delete(id));
+}
+
+/* Raw take audio, keyed by kit id. Written only when a segment is added or
+ * removed, never on the kit's debounced save. */
+export function saveTake(kitId, timelineData) {
+  return transact(TAKES, 'readwrite', (store) => store.put({ id: kitId, ...timelineData }));
+}
+
+export function loadTake(kitId) {
+  return transact(TAKES, 'readonly', (store) => store.get(kitId));
+}
+
+export function deleteTake(kitId) {
+  return transact(TAKES, 'readwrite', (store) => store.delete(kitId));
 }
 
 export function getSetting(key, fallback = null) {

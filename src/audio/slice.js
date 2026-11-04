@@ -131,6 +131,23 @@ export function features(samples, sampleRate) {
   }
   const decayMs = (decaySteps * win * 1000) / sampleRate;
 
+  // Attack: how long the sound takes to reach its own peak. This is the
+  // sharpest line between percussion and breathing — a hit is there almost
+  // immediately, a breath swells.
+  const attackMs = (peakAt * win * 1000) / sampleRate;
+
+  // Crest factor: peak over RMS. Percussive sounds are spiky and score high;
+  // breaths and room noise are flat and score low.
+  let squared = 0;
+  let absPeak = 0;
+  for (let i = 0; i < samples.length; i++) {
+    squared += samples[i] * samples[i];
+    const a = Math.abs(samples[i]);
+    if (a > absPeak) absPeak = a;
+  }
+  const rms = Math.sqrt(squared / Math.max(1, samples.length));
+  const crest = rms > 0 ? absPeak / rms : 0;
+
   return {
     centroid,
     rolloff,
@@ -140,6 +157,8 @@ export function features(samples, sampleRate) {
     midRatio: total > 0 ? mid / total : 0,
     highRatio: total > 0 ? high / total : 0,
     decayMs,
+    attackMs,
+    crest,
     durationMs: (samples.length * 1000) / sampleRate,
     peak,
   };
@@ -150,7 +169,7 @@ export function features(samples, sampleRate) {
  * Each hit is normalised so pads sound even, but the original peak is kept so
  * the derived pattern can reproduce the dynamics that were performed.
  */
-export function sliceTake(samples, sampleRate, onsetFrames, timeOf) {
+export function sliceTake(samples, sampleRate, onsets, timeOf) {
   const preRoll = Math.round((PRE_ROLL_MS / 1000) * sampleRate);
   const maxLen = Math.round((MAX_LEN_MS / 1000) * sampleRate);
   const minLen = Math.round((MIN_LEN_MS / 1000) * sampleRate);
@@ -160,12 +179,12 @@ export function sliceTake(samples, sampleRate, onsetFrames, timeOf) {
 
   const hits = [];
 
-  for (let i = 0; i < onsetFrames.length; i++) {
-    const onsetTime = timeOf(onsetFrames[i]);
+  for (let i = 0; i < onsets.length; i++) {
+    const onsetTime = timeOf(onsets[i].frame);
     const start = Math.max(0, Math.round(onsetTime * sampleRate) - preRoll);
 
-    const nextStart = i + 1 < onsetFrames.length
-      ? Math.round(timeOf(onsetFrames[i + 1]) * sampleRate) - preRoll
+    const nextStart = i + 1 < onsets.length
+      ? Math.round(timeOf(onsets[i + 1].frame) * sampleRate) - preRoll
       : samples.length;
 
     // Read past the next onset to measure the tail, but never play into it.
@@ -198,6 +217,8 @@ export function sliceTake(samples, sampleRate, onsetFrames, timeOf) {
       samples: buf,
       sampleRate,
       originalPeak: peak,
+      // How hard the detector saw this onset, relative to the take's hardest.
+      strength: onsets[i].strength ?? 1,
       features: features(buf, sampleRate),
     });
   }

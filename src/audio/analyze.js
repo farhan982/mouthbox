@@ -9,6 +9,7 @@
 
 import { onsetEnvelope, pickOnsets } from './onsets.js';
 import { sliceTake } from './slice.js';
+import { partitionHits } from './breath.js';
 import { classify } from './classify.js';
 import { inferTempo, buildPattern } from './tempo.js';
 import { defaultPad } from './engine.js';
@@ -29,7 +30,13 @@ export function prepare(samples, sampleRate) {
   return { samples, sampleRate, env, tempo };
 }
 
-export function analyze(prepared, { sensitivity = 0.5, groups = 'auto', bpmOverride = null } = {}) {
+export function analyze(prepared, {
+  sensitivity = 0.5,
+  groups = 'auto',
+  bpmOverride = null,
+  ignoreBreaths = true,
+  strictness = 0.5,
+} = {}) {
   const { samples, sampleRate, env } = prepared;
   const onsets = pickOnsets(env, { sensitivity });
 
@@ -40,8 +47,16 @@ export function analyze(prepared, { sensitivity = 0.5, groups = 'auto', bpmOverr
     );
   }
 
-  const hits = sliceTake(samples, sampleRate, onsets, env.timeOf);
-  if (hits.length < 2) throw new AnalysisError('Could not pull usable slices out of that take.');
+  const sliced = sliceTake(samples, sampleRate, onsets, env.timeOf);
+  if (sliced.length < 2) throw new AnalysisError('Could not pull usable slices out of that take.');
+
+  const { kept: hits, rejected } = ignoreBreaths
+    ? partitionHits(sliced, { strictness })
+    : { kept: sliced, rejected: [] };
+
+  if (hits.length < 2) {
+    throw new AnalysisError('Everything in that take looked like breathing or room noise.');
+  }
 
   const padGroups = classify(hits, { groups });
   const tempo = bpmOverride
@@ -55,8 +70,12 @@ export function analyze(prepared, { sensitivity = 0.5, groups = 'auto', bpmOverr
     pattern,
     tempo,
     hits,
+    rejected,
     onsets,
-    onsetTimes: onsets.map((f) => env.timeOf(f)),
+    // Only the hits that survived get a marker on the waveform; the rejected
+    // ones are shown separately so you can see what was thrown away.
+    onsetTimes: hits.map((h) => h.time),
+    rejectedTimes: rejected.map((h) => h.time),
     duration: samples.length / sampleRate,
   };
 }

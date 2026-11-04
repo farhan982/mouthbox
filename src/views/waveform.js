@@ -27,7 +27,9 @@ function peaks(samples, buckets) {
 
 /* `assignments` maps each onset to the pad index it ended up on, so markers
  * are coloured like the pads they produced. */
-export function drawWaveform(canvas, { samples, sampleRate, onsetTimes = [], assignments = [] }) {
+export function drawWaveform(canvas, {
+  samples, sampleRate, onsetTimes = [], assignments = [], rejectedTimes = [],
+}) {
   const ratio = window.devicePixelRatio || 1;
   const width = canvas.clientWidth || 600;
   canvas.width = Math.round(width * ratio);
@@ -54,6 +56,20 @@ export function drawWaveform(canvas, { samples, sampleRate, onsetTimes = [], ass
     ctx.lineTo(x + 0.5, mid + h);
   }
   ctx.stroke();
+
+  // Rejected hits first and underneath: faint, so you can see what was thrown
+  // away without it competing with what was kept.
+  ctx.strokeStyle = 'rgba(255,255,255,0.14)';
+  ctx.lineWidth = 1;
+  for (const time of rejectedTimes) {
+    const x = duration > 0 ? (time / duration) * width : 0;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(x, 10);
+    ctx.lineTo(x, HEIGHT - 10);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
 
   onsetTimes.forEach((time, i) => {
     const x = duration > 0 ? (time / duration) * width : 0;

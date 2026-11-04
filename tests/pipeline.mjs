@@ -1,15 +1,16 @@
 /* Regression test for the analysis pipeline.
  *
  * The pipeline is the product, and it is the one part that cannot be checked
- * by looking at the screen — so it gets a synthetic take with known hits at a
- * known tempo, and we assert that it comes back out.
+ * by looking at the screen — so it runs against a synthetic take with known
+ * hits at a known tempo, defined in fixture.mjs.
  *
- *   node tests/pipeline.mjs
+ *   node tests/pipeline.mjs            # run the checks
+ *   DIAG=1 node tests/pipeline.mjs     # also dump per-hit measurements
+ *   SWEEP=1 node tests/pipeline.mjs    # sweep breath strictness for tuning
  */
 
 import { prepare, analyze } from '../src/audio/analyze.js';
-
-const SR = 48000;
+import { SR, BPM, SCORE, cleanTake, dirtyTake } from './fixture.mjs';
 
 let failures = 0;
 
@@ -19,152 +20,34 @@ function check(label, condition, detail = '') {
   console.log(`  [${mark}] ${label}${detail ? ` — ${detail}` : ''}`);
 }
 
-/* A deterministic noise source, so a failure is reproducible. */
-function noise(seed) {
-  let s = seed;
-  return () => {
-    s = (s * 1664525 + 1013904223) % 4294967296;
-    return (s / 2147483648) - 1;
-  };
-}
+console.log(`Synthetic take: ${SCORE.length} hits, ${BPM} BPM, ${(cleanTake.length / SR).toFixed(2)}s\n`);
 
-function mix(target, source, atSeconds) {
-  const offset = Math.round(atSeconds * SR);
-  for (let i = 0; i < source.length; i++) {
-    const t = offset + i;
-    if (t >= 0 && t < target.length) target[t] += source[i];
-  }
-}
-
-/* --- synthetic mouth sounds ---------------------------------------------- */
-
-function kick(gain = 1) {
-  const n = Math.round(SR * 0.22);
-  const out = new Float32Array(n);
-  const rnd = noise(7);
-  for (let i = 0; i < n; i++) {
-    const t = i / SR;
-    const env = Math.exp(-t * 26);
-    // Pitch sweeps down, like a thrown "b" sound.
-    const freq = 110 * Math.exp(-t * 18) + 48;
-    out[i] = Math.sin(2 * Math.PI * freq * t) * env * gain;
-    if (i < 90) out[i] += rnd() * 0.3 * (1 - i / 90) * gain; // lip transient
-  }
-  return out;
-}
-
-/* A two-pole resonant band pass, so the synthetic snare actually sits in the
- * mids. A one-pole smoother leaves far too much energy above 5 kHz and the
- * result measures as a hi-hat rather than a snare. */
-function bandpass(centreHz, q) {
-  const w = (2 * Math.PI * centreHz) / SR;
-  const alpha = Math.sin(w) / (2 * q);
-  const norm = 1 + alpha;
-  const b0 = alpha / norm;
-  const b2 = -alpha / norm;
-  const a1 = (-2 * Math.cos(w)) / norm;
-  const a2 = (1 - alpha) / norm;
-  let x1 = 0; let x2 = 0; let y1 = 0; let y2 = 0;
-  return (x) => {
-    const y = b0 * x + b2 * x2 - a1 * y1 - a2 * y2;
-    x2 = x1; x1 = x; y2 = y1; y1 = y;
-    return y;
-  };
-}
-
-function snare(gain = 1) {
-  const n = Math.round(SR * 0.19);
-  const out = new Float32Array(n);
-  const rnd = noise(31);
-  const filter = bandpass(1900, 1.1);
-  for (let i = 0; i < n; i++) {
-    const t = i / SR;
-    const env = Math.exp(-t * 30);
-    const body = filter(rnd()) * 3.2;
-    out[i] = (body * 0.8 + Math.sin(2 * Math.PI * 190 * t) * 0.45) * env * gain;
-  }
-  return out;
-}
-
-function hat(gain = 1) {
-  const n = Math.round(SR * 0.055);
-  const out = new Float32Array(n);
-  const rnd = noise(97);
-  let prev = 0;
-  for (let i = 0; i < n; i++) {
-    const t = i / SR;
-    const env = Math.exp(-t * 95);
-    const white = rnd();
-    // One-pole high pass: pushes the energy up where a "ts" lives.
-    const high = white - prev;
-    prev = white;
-    out[i] = high * env * gain;
-  }
-  return out;
-}
-
-/* --- the take ------------------------------------------------------------ */
-
-const BPM = 100;
-const STEP = 60 / BPM / 4;          // 16th note
-const LEAD_IN = 0.25;
-
-/* Two bars of a plain boom-bap pattern. */
-const SCORE = [
-  ...[0, 6, 8, 14, 16, 22, 24, 30].map((s) => ['kick', s]),
-  ...[4, 12, 20, 28].map((s) => ['snare', s]),
-  ...[2, 6, 10, 14, 18, 22, 26, 30].map((s) => ['hat', s]),
-];
-
-const totalSteps = 32;
-const length = Math.round((LEAD_IN + totalSteps * STEP + 0.5) * SR);
-const take = new Float32Array(length);
-
-const voices = { kick, snare, hat };
-const expectedTimes = new Set();
-
-for (const [voice, step] of SCORE) {
-  const at = LEAD_IN + step * STEP;
-  // Slight human drift so the test is not an unrealistically perfect grid.
-  const jitter = ((step * 37) % 7 - 3) * 0.0015;
-  const gain = voice === 'hat' ? 0.5 : voice === 'snare' ? 0.8 : 1;
-  mix(take, voices[voice](gain), at + jitter);
-  expectedTimes.add(Math.round((at + jitter) * 1000));
-}
-
-// Light room noise, so the adaptive threshold has something to reject.
-const rnd = noise(1234);
-for (let i = 0; i < take.length; i++) take[i] += rnd() * 0.0015;
-
-// Keep it away from clipping, as a real recording would be.
-let peak = 0;
-for (const v of take) peak = Math.max(peak, Math.abs(v));
-for (let i = 0; i < take.length; i++) take[i] = (take[i] / peak) * 0.8;
-
-/* --- assertions ---------------------------------------------------------- */
-
-console.log(`Synthetic take: ${SCORE.length} hits, ${BPM} BPM, ${(take.length / SR).toFixed(2)}s\n`);
-
-const prepared = prepare(take, SR);
+const prepared = prepare(cleanTake, SR);
 const result = analyze(prepared, { sensitivity: 0.5 });
+
+/* --- onsets --------------------------------------------------------------- */
 
 console.log('Onset detection');
 // Hats land on the same step as kicks four times; those merge into one onset,
-// which is correct behaviour, so the expected count is the distinct positions.
-const expected = expectedTimes.size;
+// which is correct, so the expected count is the distinct positions.
+const distinctPositions = new Set(SCORE.map(([, step]) => step)).size;
 check(
   'finds roughly the right number of hits',
-  Math.abs(result.hits.length - expected) <= 3,
-  `found ${result.hits.length}, expected about ${expected}`
+  Math.abs(result.hits.length - distinctPositions) <= 3,
+  `found ${result.hits.length}, expected about ${distinctPositions}`
 );
+
+/* --- tempo ---------------------------------------------------------------- */
 
 console.log('\nTempo');
 const bpm = result.tempo.bpm;
-const octaveOk = [bpm, bpm / 2, bpm * 2].some((candidate) => Math.abs(candidate - BPM) < 3);
 check('recovers the tempo', Math.abs(bpm - BPM) < 3, `got ${bpm} BPM, expected ${BPM}`);
-check('is at worst an octave out', octaveOk, `got ${bpm} BPM`);
+check('is at worst an octave out',
+  [bpm, bpm / 2, bpm * 2].some((c) => Math.abs(c - BPM) < 3), `got ${bpm} BPM`);
 check('reports usable confidence', result.tempo.confidence > 0.15,
   `confidence ${result.tempo.confidence.toFixed(2)}`);
+
+/* --- classification ------------------------------------------------------- */
 
 console.log('\nClassification');
 const names = result.groups.map((g) => g.name);
@@ -174,37 +57,83 @@ check('finds a low sound', names.some((n) => /kick|bass/i.test(n)), names.join('
 check('finds a bright sound', names.some((n) => /hat|cymbal/i.test(n)), names.join(', '));
 check('finds a noisy mid sound', names.some((n) => /snare|rim|perc|tone/i.test(n)), names.join(', '));
 
-// Pads are sorted dark to bright, so the kick must come before the hat.
 const kickAt = names.findIndex((n) => /kick|bass/i.test(n));
 const hatAt = names.findIndex((n) => /hat|cymbal/i.test(n));
 check('orders pads dark to bright', kickAt >= 0 && hatAt >= 0 && kickAt < hatAt,
   `kick at ${kickAt}, hat at ${hatAt}`);
 
+/* --- pattern -------------------------------------------------------------- */
+
 console.log('\nPattern');
 const filled = result.pattern.steps.flat().filter(Boolean).length;
-check('quantises hits onto the grid', filled >= expected - 4,
-  `${filled} steps filled of about ${expected}`);
+check('quantises hits onto the grid', filled >= distinctPositions - 4,
+  `${filled} steps filled of about ${distinctPositions}`);
 check('rounds to whole bars', result.pattern.length % 16 === 0,
   `${result.pattern.length} steps (${result.pattern.bars} bars)`);
 check('keeps performed dynamics', new Set(result.pattern.steps.flat()
   .filter(Boolean).map((c) => Math.round(c.velocity * 10))).size > 1,
   'more than one velocity level present');
 
+/* --- breath rejection ------------------------------------------------------ */
+
+console.log('\nBreath rejection');
+
+const dirty = prepare(dirtyTake, SR);
+const unfiltered = analyze(dirty, { sensitivity: 0.5, ignoreBreaths: false });
+const filtered = analyze(dirty, { sensitivity: 0.5, ignoreBreaths: true });
+
+const realTimes = result.hits.map((h) => h.time);
+const isReal = (t) => realTimes.some((rt) => Math.abs(rt - t) < 0.04);
+
+check('breathing adds spurious onsets',
+  unfiltered.hits.length > result.hits.length,
+  `${unfiltered.hits.length} with breaths vs ${result.hits.length} without`);
+
+// The failure that matters most: a breath must not make the detector deaf.
+// A sustained sound inside the adaptive threshold window used to drag the
+// local median up and mask the real hits around it.
+check('breathing does not mask real hits',
+  unfiltered.hits.filter((h) => isReal(h.time)).length >= result.hits.length - 1,
+  `${unfiltered.hits.filter((h) => isReal(h.time)).length} of ${result.hits.length} real hits still found`);
+
+const keptReal = filtered.hits.filter((h) => isReal(h.time)).length;
+const keptBreath = filtered.hits.length - keptReal;
+const totalBreath = unfiltered.hits.length - unfiltered.hits.filter((h) => isReal(h.time)).length;
+
+check('keeps every real hit', keptReal === result.hits.length,
+  `${keptReal} of ${result.hits.length}`);
+check('rejects most breathing', keptBreath <= Math.max(1, Math.floor(totalBreath * 0.25)),
+  `${keptBreath} of ${totalBreath} breath slices survived`);
+check('a clean take loses nothing',
+  analyze(prepared, { sensitivity: 0.5, ignoreBreaths: true }).rejected.length === 0,
+  'nothing rejected from a take with no breaths');
+
 if (process.env.DIAG) {
-  console.log('\nFeature dump');
-  for (const g of result.groups) {
-    const f = g.mean;
-    console.log(`  ${g.name.padEnd(8)} n=${String(g.members.length).padStart(2)} ` +
-      `centroid=${Math.round(f.centroid).toString().padStart(5)} ` +
-      `rolloff=${Math.round(f.rolloff).toString().padStart(5)} ` +
-      `low=${f.lowRatio.toFixed(2)} high=${f.highRatio.toFixed(2)} ` +
-      `flat=${f.flatness.toFixed(3)} zcr=${f.zcr.toFixed(2)} decay=${Math.round(f.decayMs)}ms`);
+  console.log('\n  Per-hit measurements (take with breaths)');
+  const loudest = Math.max(...unfiltered.hits.map((h) => h.originalPeak));
+  for (const h of unfiltered.hits) {
+    const f = h.features;
+    console.log(`    ${isReal(h.time) ? 'hit   ' : 'BREATH'} t=${h.time.toFixed(2)}s ` +
+      `str=${(h.strength ?? 1).toFixed(2)} attack=${Math.round(f.attackMs).toString().padStart(3)}ms ` +
+      `crest=${f.crest.toFixed(1).padStart(5)} rel=${(h.originalPeak / loudest).toFixed(2)} ` +
+      `flat=${f.flatness.toFixed(2)} dur=${Math.round(f.durationMs)}ms`);
   }
 }
 
+if (process.env.SWEEP) {
+  console.log('\n  Strictness sweep (real kept / breath kept)');
+  for (let s = 0.2; s <= 0.85; s += 0.05) {
+    const r = analyze(dirty, { sensitivity: 0.5, ignoreBreaths: true, strictness: s });
+    const real = r.hits.filter((h) => isReal(h.time)).length;
+    console.log(`    ${s.toFixed(2)}  ${real}/${result.hits.length}  ${r.hits.length - real}`);
+  }
+}
+
+/* --- sensitivity ----------------------------------------------------------- */
+
 console.log('\nSensitivity');
-const quiet = analyze(prepared, { sensitivity: 0.95 });
 const eager = analyze(prepared, { sensitivity: 0.05 });
+const quiet = analyze(prepared, { sensitivity: 0.95 });
 check('sensitivity changes the hit count monotonically',
   eager.hits.length >= result.hits.length && result.hits.length >= quiet.hits.length,
   `${eager.hits.length} / ${result.hits.length} / ${quiet.hits.length} hits at 0.05 / 0.5 / 0.95`);

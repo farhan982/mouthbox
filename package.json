@@ -4,7 +4,7 @@
   "type": "module",
   "description": "Static app; package.json exists so the DSP tests can run as ES modules under node.",
   "scripts": {
-    "test": "node tests/pipeline.mjs",
+    "test": "node tests/pipeline.mjs && node tests/timeline.mjs",
     "start": "python3 serve.py 8940"
   }
 }

@@ -488,3 +488,31 @@ input[type="range"]::-moz-range-thumb {
   .record-button { width: 64px; height: 64px; }
   .lane-label { flex-basis: 84px; }
 }
+
+/* --- recorded parts ------------------------------------------------------- */
+
+.segments { display: flex; flex-direction: column; gap: 6px; }
+.segment-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 13px;
+  flex-wrap: wrap;
+}
+.segment-row .muted { margin-left: auto; }
+
+/* Counting in: the button is held until the performer's bar line arrives. */
+.record-button.is-counting {
+  border-color: var(--accent);
+  background: #10242a;
+  cursor: default;
+}
+.record-button.is-counting .record-dot {
+  background: var(--accent);
+  animation: pulse 0.5s ease-in-out infinite;
+}
+.record-button:disabled { opacity: 1; }
