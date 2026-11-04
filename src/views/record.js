@@ -17,6 +17,7 @@ import { padColor } from './colors.js';
 let recorder = null;
 let take = null;        // prepared take: { samples, sampleRate, env, tempo }
 let result = null;      // latest analysis
+let builtFromTake = false; // the live kit came from the take still held here
 let error = null;
 let options = { sensitivity: 0.5, groups: 'auto' };
 let elapsedTimer = null;
@@ -199,9 +200,18 @@ export function renderRecord(root, rerender) {
     ]));
 
     wrap.appendChild(el('div', { class: 'row row-actions' }, [
-      button('Build kit', () => buildKit(rerender), { class: 'btn btn-primary', disabled: !result }),
+      button(builtFromTake ? 'Rebuild kit' : 'Build kit', () => buildKit(rerender),
+        { class: 'btn btn-primary', disabled: !result }),
       button('Record again', () => discard(rerender), { class: 'btn' }),
     ]));
+
+    if (builtFromTake) {
+      wrap.appendChild(el('p', {
+        class: 'hint',
+        text: 'This take is still here. Change the pad count or sensitivity above and rebuild — '
+          + 'you do not need to perform it again. Rebuilding replaces the current pads and patterns.',
+      }));
+    }
   }
 
   root.appendChild(wrap);
@@ -227,6 +237,7 @@ async function startRecording(meter, rerender) {
     take = null;
     result = null;
     error = null;
+    builtFromTake = false;
     const stopClick = startMetronome();
     recorder.stopClick = stopClick;
     state.setStatus(null);
@@ -278,7 +289,9 @@ async function buildKit(rerender) {
   if (!result) return;
   const kit = state.getKit();
 
-  if (kit.pads.length) {
+  // Rebuilding from the take the kit already came from is the re-slice loop,
+  // not a destructive replacement, so it does not ask.
+  if (kit.pads.length && !builtFromTake) {
     const ok = await confirmDialog({
       title: 'Replace the current kit?',
       body: 'Building a kit from this take discards the pads and patterns you have now.',
@@ -294,8 +307,9 @@ async function buildKit(rerender) {
 
   const built = commit(result, bank);
   state.adoptAnalysis(built);
-  take = null;
-  result = null;
+  // The take is kept so it can be re-sliced at a different pad count or
+  // sensitivity without performing it again.
+  builtFromTake = true;
   rerender();
 }
 
@@ -303,5 +317,6 @@ async function discard(rerender) {
   take = null;
   result = null;
   error = null;
+  builtFromTake = false;
   rerender();
 }
