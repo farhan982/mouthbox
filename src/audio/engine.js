@@ -39,6 +39,25 @@ export class SampleBank {
     return flipped;
   }
 
+  /* Moves every sample into a new context.
+   *
+   * Needed when the context is rebuilt to get iOS out of record routing.
+   * Buffers are copied rather than reused: an AudioBuffer from a closed
+   * context is legal to play, but the new context may be running at a
+   * different sample rate and copying keeps each buffer's own rate intact.
+   */
+  rehome(ctx) {
+    const moved = new Map();
+    for (const [id, buffer] of this.buffers) {
+      const next = ctx.createBuffer(1, buffer.length, buffer.sampleRate);
+      next.copyToChannel(buffer.getChannelData(0), 0);
+      moved.set(id, next);
+    }
+    this.ctx = ctx;
+    this.buffers = moved;
+    this.reversed.clear(); // regenerated on demand, in the new context
+  }
+
   peaks(id, buckets = 48) {
     const buffer = this.buffers.get(id);
     if (!buffer) return [];

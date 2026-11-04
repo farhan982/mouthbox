@@ -5,7 +5,7 @@
  * engine handle down through every function.
  */
 
-import { audioContext, resume } from './audio/record.js';
+import { audioContext, resume, resetAudioContext } from './audio/record.js';
 import { SampleBank, Engine } from './audio/engine.js';
 import { Sequencer } from './audio/sequencer.js';
 
@@ -27,6 +27,23 @@ export function runtime() {
 export async function unlock() {
   await resume();
   return runtime();
+}
+
+/* Rebuilds the context and everything hanging off it, carrying the samples
+ * across. Called after recording, because on iOS the old context is stuck
+ * routing to the earpiece once a microphone has been opened on it.
+ */
+export async function resetContext() {
+  const previous = instance;
+  const ctx = await resetAudioContext();
+
+  const bank = previous ? previous.bank : new SampleBank(ctx);
+  if (previous) bank.rehome(ctx);
+
+  const engine = new Engine(ctx, bank);
+  const sequencer = new Sequencer(ctx, engine);
+  instance = { ctx, bank, engine, sequencer };
+  return instance;
 }
 
 /* Loads persisted samples back into the bank after a reload. Keeps the

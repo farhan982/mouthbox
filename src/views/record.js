@@ -7,7 +7,7 @@
  */
 
 import * as state from '../state.js';
-import { runtime, unlock } from '../runtime.js';
+import { runtime, unlock, resetContext } from '../runtime.js';
 import { Recorder } from '../audio/record.js';
 import { prepare, analyze, commit, AnalysisError } from '../audio/analyze.js';
 import { el, button, slider, confirmDialog, formatTime } from './ui.js';
@@ -86,7 +86,7 @@ export function renderRecord(root, rerender) {
     'aria-label': recording ? 'Stop recording' : 'Start recording',
     onClick: async () => {
       if (recording) {
-        stopRecording(rerender);
+        await stopRecording(rerender);
         return;
       }
       await startRecording(meter, rerender);
@@ -217,6 +217,10 @@ function stat(label, value, sub = null) {
 
 async function startRecording(meter, rerender) {
   try {
+    // Playback and capture on one context is asking for feedback, and the
+    // context is about to be retired anyway.
+    runtime().sequencer.stop();
+    state.setUi({ playing: false });
     await unlock();
     recorder = new Recorder({ onLevel: (level) => meter.update(level) });
     await recorder.start();
@@ -237,11 +241,20 @@ async function startRecording(meter, rerender) {
   }
 }
 
-function stopRecording(rerender) {
+async function stopRecording(rerender) {
   clearInterval(elapsedTimer);
   if (recorder?.stopClick) recorder.stopClick();
   const captured = recorder.stop();
   recorder = null;
+
+  // The context that held the microphone is retired here. On iOS it stays
+  // wired to the earpiece once a mic has been opened on it, so everything
+  // played back afterwards would be inaudible from the speaker.
+  try {
+    await resetContext();
+  } catch {
+    state.setStatus('Audio had to restart after recording. If playback is silent, reload the page.');
+  }
 
   if (captured.duration < 0.4) {
     take = null;

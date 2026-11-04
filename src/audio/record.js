@@ -17,10 +17,43 @@ export function audioContext() {
   return context;
 }
 
+/* iOS routes output to the earpiece receiver, not the speaker, whenever the
+ * audio session is in "play and record" — and opening a microphone puts it
+ * there. WebKit does not reliably put it back when the mic stops, so playback
+ * after a take comes out of the wrong hole at a fraction of the volume.
+ *
+ * Safari 16.4+ exposes the session category directly, which is the clean fix.
+ * Older versions need the context rebuilt instead (see resetAudioContext).
+ */
+export function setAudioSession(type) {
+  try {
+    if (navigator.audioSession) navigator.audioSession.type = type;
+  } catch {
+    // Not supported here; resetAudioContext is the fallback.
+  }
+}
+
 export async function resume() {
   const ctx = audioContext();
+  // iOS adds an 'interrupted' state that resume() also clears.
   if (ctx.state !== 'running') await ctx.resume();
   return ctx;
+}
+
+/* Tears down the context and builds a fresh one.
+ *
+ * The only reliable way to get iOS back out of record routing on versions
+ * without navigator.audioSession. Callers must re-home anything holding a
+ * reference to the old context.
+ */
+export async function resetAudioContext() {
+  const old = context;
+  context = null;
+  workletReady = false;
+  if (old) {
+    try { await old.close(); } catch { /* already closed */ }
+  }
+  return audioContext();
 }
 
 /* Echo cancellation and noise suppression are tuned for speech and will chew
@@ -46,7 +79,13 @@ export class Recorder {
   }
 
   async start() {
+    setAudioSession('play-and-record');
     const ctx = await resume();
+
+    // Captured now, not at stop time: iOS can hand back a different rate once
+    // the session leaves record mode, and these blocks were sampled at this
+    // one. Analysing them at the wrong rate shifts every detected tempo.
+    this.sampleRate = ctx.sampleRate;
 
     if (!workletReady) {
       await ctx.audioWorklet.addModule(WORKLET_URL);
@@ -97,7 +136,10 @@ export class Recorder {
     }
     this.blocks = [];
 
-    const sampleRate = audioContext().sampleRate;
+    // Hand the session back to plain playback so iOS returns to the speaker.
+    setAudioSession('playback');
+
+    const sampleRate = this.sampleRate || audioContext().sampleRate;
     return { samples, sampleRate, duration: total / sampleRate };
   }
 
