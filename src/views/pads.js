@@ -7,6 +7,7 @@
 import * as state from '../state.js';
 import { runtime, unlock } from '../runtime.js';
 import { sampleToWav, download } from '../audio/wav.js';
+import { DRUM_TYPES, DRUM_PARAMS, suggestDrum } from '../audio/drums.js';
 import { el, button, slider, confirmDialog } from './ui.js';
 import { padColor } from './colors.js';
 
@@ -75,6 +76,64 @@ export function renderPads(root, rerender) {
     }
   };
   window.addEventListener('keydown', keyHandler);
+}
+
+/* The synthesised drum sitting under this pad.
+ *
+ * Changing the voice resets its parameters to the tuning suggested for this
+ * pad's own timbre, rather than carrying over values that meant something
+ * else on a different voice. */
+function drumSection(pad, update, rerender) {
+  const drum = pad.drum || { type: 'none', blend: 0 };
+  const setDrum = (patch) => update({ drum: { ...drum, ...patch } });
+
+  const rows = [
+    el('div', { class: 'field' }, [
+      el('span', { text: 'Drum layer' }),
+      el('select', {
+        onChange: (e) => {
+          const type = e.target.value;
+          if (type === 'none') setDrum({ type: 'none' });
+          else {
+            const suggested = suggestDrum(pad.name, pad.tone || {});
+            const fresh = suggested.type === type ? suggested : { type };
+            setDrum({ ...fresh, type, blend: drum.blend || 0.5 });
+          }
+          rerender();
+        },
+      }, DRUM_TYPES.map((option) => el('option', {
+        value: option.id,
+        selected: drum.type === option.id,
+        text: option.label,
+      }))),
+    ]),
+  ];
+
+  if (drum.type && drum.type !== 'none') {
+    rows.push(slider({
+      label: 'Blend',
+      min: 0, max: 1, step: 0.02, value: drum.blend ?? 0,
+      format: (v) => (v < 0.02 ? 'all you' : v > 0.98 ? 'all drum' : `${Math.round(v * 100)}% drum`),
+      onInput: (v) => setDrum({ blend: v }),
+    }));
+
+    for (const param of DRUM_PARAMS[drum.type] || []) {
+      rows.push(slider({
+        label: param.label,
+        min: param.min,
+        max: param.max,
+        step: param.step,
+        value: drum[param.key] ?? param.fallback,
+        format: param.format,
+        onInput: (v) => setDrum({ [param.key]: v }),
+      }));
+    }
+  }
+
+  return el('div', { class: 'drum-section' }, [
+    el('h3', { text: 'Real drum' }),
+    ...rows,
+  ]);
 }
 
 function inspector(pad, index, rerender) {
@@ -169,6 +228,7 @@ function inspector(pad, index, rerender) {
           el('span', { text: 'Choke' }),
         ]),
       ]),
+      drumSection(pad, update, rerender),
       pad.sampleIds.length > 1 ? el('div', { class: 'sample-row' },
         pad.sampleIds.map((id, i) => button(`${i + 1}`, async () => {
           await unlock();

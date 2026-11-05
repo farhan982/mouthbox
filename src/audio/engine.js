@@ -5,6 +5,8 @@
  * changes are heard immediately without rebuilding anything.
  */
 
+import { renderDrum, blendGains } from './drums.js';
+
 /* Audio buffers live here rather than on the pad objects, so app state stays
  * plain serialisable data. */
 export class SampleBank {
@@ -83,6 +85,11 @@ export function defaultPad(id, name, sampleIds) {
     id,
     name,
     sampleIds,
+    // A synthesised drum sitting under the recorded sound. The type is
+    // chosen when the kit is built, but blend starts at zero so the kit
+    // sounds exactly like the performance until it is deliberately turned up.
+    drum: { type: 'none', blend: 0 },
+    tone: {},        // measured timbre, used to tune the drum layer
     gain: 0.85,
     pitch: 0,        // semitones
     pan: 0,          // -1 .. 1
@@ -103,6 +110,7 @@ export class Engine {
   constructor(ctx, bank) {
     this.ctx = ctx;
     this.bank = bank;
+    this.drumCache = new Map();
     this.master = ctx.createGain();
     this.master.gain.value = 0.9;
 
@@ -169,13 +177,86 @@ export class Engine {
     return pad.sampleIds[next];
   }
 
-  /* Triggers one hit. `when` is an AudioContext timestamp. */
-  trigger(pad, when = this.ctx.currentTime, velocity = 1, sampleId = null) {
-    const id = sampleId || this.pickSample(pad);
-    if (!id) return null;
-    const buffer = this.bank.get(id, pad.reverse);
-    if (!buffer) return null;
+  /* The synthesised drum layer for a pad, as an AudioBuffer in this context.
+   * Cached: a pad retriggers constantly and the synthesis is deterministic. */
+  drumBuffer(pad) {
+    const drum = pad.drum;
+    if (!drum || !drum.type || drum.type === 'none') return null;
 
+    const { type, blend, ...params } = drum;
+    const key = `${type}|${pad.reverse ? 'r' : 'f'}|${JSON.stringify(params)}`;
+    let buffer = this.drumCache.get(key);
+    if (buffer !== undefined) return buffer;
+
+    // Dragging a parameter slider mints a buffer per step, so the cache is
+    // bounded. These are cheap to regenerate.
+    if (this.drumCache.size > 64) this.drumCache.clear();
+
+    const data = renderDrum(type, params, this.ctx.sampleRate);
+    if (!data) {
+      this.drumCache.set(key, null);
+      return null;
+    }
+
+    buffer = this.ctx.createBuffer(1, data.length, this.ctx.sampleRate);
+    if (pad.reverse) {
+      const flipped = new Float32Array(data.length);
+      for (let i = 0; i < data.length; i++) flipped[i] = data[data.length - 1 - i];
+      buffer.copyToChannel(flipped, 0);
+    } else {
+      buffer.copyToChannel(data, 0);
+    }
+    this.drumCache.set(key, buffer);
+    return buffer;
+  }
+
+  /* Triggers one hit.
+   *
+   * Two layers can sound: the recorded mouth sound and a synthesised drum
+   * under it, mixed with an equal-power crossfade so sliding between them
+   * does not dip in the middle. Both run through the same pad chain, so
+   * level, pan, filter and envelope apply to the pair.
+   */
+  trigger(pad, when = this.ctx.currentTime, velocity = 1, sampleId = null) {
+    const gains = blendGains(pad.drum?.blend ?? 0);
+    const drum = gains.drum > 0.0001 ? this.drumBuffer(pad) : null;
+
+    const voices = [];
+    if (drum) voices.push(this.playLayer(pad, drum, when, velocity * gains.drum));
+
+    // Fully crossfaded onto the drum: skip the recording entirely rather
+    // than spending a voice on silence.
+    if (gains.sample > 0.0001) {
+      const id = sampleId || this.pickSample(pad);
+      const buffer = id ? this.bank.get(id, pad.reverse) : null;
+      if (buffer) voices.push(this.playLayer(pad, buffer, when, velocity * gains.sample));
+    }
+
+    if (!voices.length) return null;
+
+    // Choking applies to the whole hit, both layers together. Doing it
+    // per-layer would have the sample layer cut off the drum layer of the
+    // very same hit.
+    if (pad.choke > 0) {
+      const previous = this.chokeVoices.get(pad.choke);
+      if (previous) {
+        for (const voice of previous) {
+          if (voices.includes(voice)) continue;
+          try {
+            voice.env.gain.cancelScheduledValues(when);
+            voice.env.gain.setTargetAtTime(0, when, 0.004);
+            voice.source.stop(when + 0.05);
+          } catch { /* already stopped */ }
+        }
+      }
+      this.chokeVoices.set(pad.choke, voices);
+    }
+
+    return voices[voices.length - 1].source;
+  }
+
+  /* One voice: source -> envelope -> filter -> pad chain. */
+  playLayer(pad, buffer, when, velocity) {
     const nodes = this.nodesFor(pad);
     const source = this.ctx.createBufferSource();
     source.buffer = buffer;
@@ -210,23 +291,11 @@ export class Engine {
     source.start(when);
     source.stop(stopAt);
 
-    if (pad.choke > 0) {
-      const previous = this.chokeVoices.get(pad.choke);
-      if (previous && previous.source !== source) {
-        try {
-          previous.env.gain.cancelScheduledValues(when);
-          previous.env.gain.setTargetAtTime(0, when, 0.004);
-          previous.source.stop(when + 0.05);
-        } catch { /* already stopped */ }
-      }
-      this.chokeVoices.set(pad.choke, { source, env });
-    }
-
     source.onended = () => {
       try { source.disconnect(); env.disconnect(); } catch { /* fine */ }
     };
 
-    return source;
+    return { source, env };
   }
 
   setMasterGain(value) {

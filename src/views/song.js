@@ -7,6 +7,7 @@
 import * as state from '../state.js';
 import { runtime } from '../runtime.js';
 import { renderToWav, download } from '../audio/wav.js';
+import { DRUM_TYPES } from '../audio/drums.js';
 import { serializeKit, parseKit, listKits, loadKit, deleteKit } from '../storage.js';
 import { el, button, slider, section, confirmDialog, formatTime } from './ui.js';
 
@@ -43,6 +44,39 @@ export function renderSong(root, rerender) {
       el('div', { class: 'row row-wrap' },
         kit.patterns.map((p) => button(`+ ${p.name}`, () => state.addToChain(p.id), { class: 'btn btn-small' }))),
       el('p', { class: 'hint', text: 'Switch the transport to Song to play the chain instead of looping one pattern.' }),
+    ]));
+  }
+
+  // --- drum layer ----------------------------------------------------------
+  if (kit.pads.length) {
+    const layered = kit.pads.filter((p) => p.drum && p.drum.type !== 'none');
+    const average = layered.length
+      ? layered.reduce((sum, p) => sum + (p.drum.blend || 0), 0) / layered.length
+      : 0;
+
+    wrap.appendChild(section('Real drums', [
+      el('p', { class: 'hint', text: 'Each pad has a synthesised drum tuned to the sound you made. This slides every pad between your voice and the drums at once; the Pads tab sets them individually.' }),
+      slider({
+        label: 'Blend everything',
+        min: 0, max: 1, step: 0.02, value: average,
+        format: (v) => (v < 0.02 ? 'all you' : v > 0.98 ? 'all drums' : `${Math.round(v * 100)}% drums`),
+        onInput: (v) => {
+          for (const pad of kit.pads) {
+            if (!pad.drum || pad.drum.type === 'none') continue;
+            pad.drum.blend = v;
+          }
+          runtime().engine.sync(kit.pads);
+        },
+        onChange: () => state.setUi({}),
+      }),
+      el('div', { class: 'row row-wrap' },
+        layered.map((pad) => el('span', { class: 'pad-chip' }, [
+          el('strong', { text: pad.name }),
+          el('span', { class: 'muted', text: DRUM_TYPES.find((t) => t.id === pad.drum.type)?.label || pad.drum.type }),
+        ]))),
+      layered.length < kit.pads.length
+        ? el('p', { class: 'muted', text: `${kit.pads.length - layered.length} pad(s) have no drum layer. Pick one on the Pads tab.` })
+        : null,
     ]));
   }
 

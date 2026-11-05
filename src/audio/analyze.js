@@ -13,6 +13,7 @@ import { partitionHits } from './breath.js';
 import { classify } from './classify.js';
 import { inferTempo, buildPattern } from './tempo.js';
 import { defaultPad } from './engine.js';
+import { suggestDrum } from './drums.js';
 
 /* Hats shouldn't ring over each other; everything else should. */
 function chokeFor(name) {
@@ -94,6 +95,12 @@ export function commit(result, bank) {
     });
     const pad = defaultPad(`p${index + 1}`, group.name, sampleIds);
     pad.choke = chokeFor(group.name);
+
+    // Remember what this pad measured as, and pick a drum voice tuned to it.
+    // Blend stays at zero: the kit sounds like the performance until the
+    // layer is deliberately turned up.
+    pad.tone = { centroid: group.mean.centroid, decayMs: group.mean.decayMs };
+    pad.drum = { ...suggestDrum(group.name, pad.tone), blend: 0 };
     return pad;
   });
 
