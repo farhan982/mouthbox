@@ -100,19 +100,19 @@ export function remember() {
 
 /* Replaces the kit's pads and patterns with the result of an analysis.
  * The previous kit is discarded, so callers confirm first. */
-export function adoptAnalysis({ pads, pattern, tempo, samples, takeInfo }) {
+export function adoptAnalysis({ pads, patterns, chain, tempo, samples, takeInfo }) {
   kit = {
     ...kit,
     bpm: Math.round(tempo.bpm),
     pads,
-    patterns: [pattern],
-    chain: [{ patternId: pattern.id, repeats: 1 }],
+    patterns,
+    chain,
     samples,
   };
   ui = {
     ...ui,
     tab: 'pads',
-    patternId: pattern.id,
+    patternId: patterns[0]?.id || null,
     selectedPad: pads[0]?.id || null,
     take: takeInfo,
     status: null,
@@ -282,6 +282,22 @@ export function addToChain(patternId) {
 
 export function removeFromChain(index) {
   kit.chain.splice(index, 1);
+  notify();
+}
+
+export function moveChainEntry(index, delta) {
+  const target = index + delta;
+  if (index < 0 || index >= kit.chain.length) return;
+  if (target < 0 || target >= kit.chain.length) return;
+  const [entry] = kit.chain.splice(index, 1);
+  kit.chain.splice(target, 0, entry);
+  notify();
+}
+
+export function duplicateChainEntry(index) {
+  const entry = kit.chain[index];
+  if (!entry) return;
+  kit.chain.splice(index + 1, 0, { ...entry });
   notify();
 }
 

@@ -24,10 +24,11 @@ with no build step and no dependencies.
 npm test
 ```
 
-Three suites: `pipeline.mjs` (onsets, tempo, classification, breath rejection,
+Four suites: `pipeline.mjs` (onsets, tempo, classification, breath rejection,
 with `DIAG=1` for per-hit measurements and `SWEEP=1` for threshold tuning),
-`timeline.mjs` (multi-pass stitching) and `drums.mjs` (the synthesised voices,
-measured with the same feature extractor the classifier uses).
+`timeline.mjs` (multi-pass stitching), `drums.mjs` (the synthesised voices,
+measured with the same feature extractor the classifier uses) and
+`arrange.mjs` (structure recovery from a song with a known shape).
 
 ## How the analysis works
 
@@ -73,6 +74,31 @@ after gets a bar of count-in and a click locked to it, and is placed on the
 next bar line after the previous part ends. The breaks disappear and the
 passes play back as one performance.
 
+**Arrangement** (`arrange.js`) — a song-length take comes out as one enormous
+grid, which is unusable: you cannot edit two hundred bars on a step
+sequencer, and it throws away the fact that you played the same eight bars
+four times. The grid is cut into blocks, blocks that are the same thing
+played again are grouped, and the result is a handful of sections plus the
+order they occur in — expressed as patterns and a chain, which the app
+already understands.
+
+Section length is chosen by trying 8, 4, 16 then 2 bars and taking the first
+that explains the song, *not* the one that scores highest. Scoring highest is
+the wrong target: the repeat ratio always rises as sections get shorter,
+because shorter sections mean more blocks to find repeats among, so a pure
+maximum collapses every song to the smallest candidate. A groove that loops
+every bar is not a one-bar song.
+
+Repeats are consolidated by majority vote: a step survives if most takes of
+that section have it, at the average velocity of the ones that do. Playing a
+part four times is what makes this pay off — a hit you fluffed once gets
+voted out, a hit you meant every time survives.
+
+Sections get a role hint (break, intro, drop) from their density relative to
+the rest. This is a hint, not an understanding: the app cannot know whether a
+sparse section is a breakdown or where you lost your place, so it is shown as
+a suggestion and never acted on.
+
 **Drums** (`drums.js`) — synthesised, not sampled. A sample pack would mean
 licensed audio and megabytes of download in an app that otherwise ships no
 assets; synthesis costs a few KB and lets each voice be tuned to the mouth
@@ -89,7 +115,9 @@ adjust and rebuild without performing anything again. **Pads** plays and shapes 
 sound (level, pitch, pan, decay, filter, reverse, choke, sample cycling) and
 sets its drum layer.
 **Steps** is the grid — click toggles, drag paints, clicking an active step
-cycles its accent. **Song** chains patterns, blends every drum layer at once, and exports.
+cycles its accent. **Song** shows the arrangement as
+blocks you can reorder, repeat, duplicate and delete, blends every drum layer
+at once, and exports.
 
 Export renders through the same engine you are hearing, inside an
 `OfflineAudioContext`, so the WAV matches the preview.
@@ -118,5 +146,12 @@ rejection and the drum layer. All three are tested against synthetic audio,
 which is a fair starting point and not the same thing as a person beatboxing
 into a phone.
 
-Still to build: arrangement — detecting repeated sections and laying them out
-on a timeline.
+Arrangement is verified end to end from audio: a synthesised 32-bar
+performance of A A B A comes back as two 8-bar sections with the chain
+A×2 B×1 A×1, exports to exactly 76.8 seconds, and the B section keeps the
+hats out the way it was played.
+
+Not built: filling a deliberate pause before a drop with something that
+belongs there. The honest blocker is that the app cannot tell a pause you
+meant from one where you ran out of breath — the section roles are the
+nearest usable approximation, and they are suggestions.

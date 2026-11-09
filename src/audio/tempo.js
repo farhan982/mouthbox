@@ -93,7 +93,10 @@ export function inferTempo(env, { min = MIN_BPM, max = MAX_BPM } = {}) {
  * Velocity comes from the hit's original peak, so the pattern keeps the
  * dynamics that were performed rather than flattening everything to full.
  */
-export function buildPattern(pads, tempo, { maxBars = 8 } = {}) {
+/* `maxBars` is a safety rail against a runaway tempo estimate turning a short
+ * take into thousands of empty bars, not a musical limit — a whole song is
+ * expected here, and the arranger cuts it into sections afterwards. */
+export function buildPattern(pads, tempo, { maxBars = 512 } = {}) {
   const stepDuration = 60 / tempo.bpm / STEPS_PER_BEAT;
 
   let loudest = 0;

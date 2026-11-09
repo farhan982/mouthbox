@@ -524,3 +524,49 @@ input[type="range"]::-moz-range-thumb {
   padding-top: 12px;
   border-top: 1px solid var(--line);
 }
+
+/* --- arrangement ---------------------------------------------------------- */
+
+.arrangement {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.arr-block {
+  --pad-color: var(--accent);
+  flex: 1 1 0;
+  min-width: 108px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--pad-color);
+  border-radius: 9px;
+  padding: 8px;
+}
+.arr-block.is-current { border-color: var(--pad-color); }
+.arr-head {
+  appearance: none;
+  background: none;
+  border: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.arr-head strong { font-size: 17px; }
+.arr-role {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.arr-controls { display: flex; gap: 3px; align-items: center; margin-top: auto; }
+.arr-controls .repeats-input { width: 46px; padding: 4px 6px; font-size: 13px; text-align: center; }

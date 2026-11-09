@@ -8,6 +8,7 @@ import * as state from '../state.js';
 import { runtime } from '../runtime.js';
 import { renderToWav, download } from '../audio/wav.js';
 import { DRUM_TYPES } from '../audio/drums.js';
+import { padColor } from './colors.js';
 import { serializeKit, parseKit, listKits, loadKit, deleteKit } from '../storage.js';
 import { el, button, slider, section, confirmDialog, formatTime } from './ui.js';
 
@@ -18,34 +19,8 @@ export function renderSong(root, rerender) {
   const kit = state.getKit();
   const wrap = el('div', { class: 'view view-song' });
 
-  // --- chain ---------------------------------------------------------------
-  if (kit.patterns.length) {
-    const rows = kit.chain.length
-      ? kit.chain.map((entry, index) => {
-        const pattern = kit.patterns.find((p) => p.id === entry.patternId);
-        return el('div', { class: 'chain-row' }, [
-          el('span', { class: 'chain-index', text: String(index + 1) }),
-          el('strong', { text: pattern ? pattern.name : 'missing' }),
-          el('label', { class: 'field field-inline' }, [
-            el('span', { text: '×' }),
-            el('input', {
-              type: 'number', min: 1, max: 16, value: entry.repeats || 1, class: 'repeats-input',
-              onChange: (e) => state.setChainRepeats(index, parseInt(e.target.value, 10) || 1),
-            }),
-          ]),
-          el('span', { class: 'muted', text: pattern ? `${pattern.bars * (entry.repeats || 1)} bars` : '' }),
-          button('Remove', () => state.removeFromChain(index), { class: 'btn btn-small' }),
-        ]);
-      })
-      : [el('p', { class: 'muted', text: 'The song is empty. Add a pattern below.' })];
-
-    wrap.appendChild(section('Song', [
-      el('div', { class: 'chain' }, rows),
-      el('div', { class: 'row row-wrap' },
-        kit.patterns.map((p) => button(`+ ${p.name}`, () => state.addToChain(p.id), { class: 'btn btn-small' }))),
-      el('p', { class: 'hint', text: 'Switch the transport to Song to play the chain instead of looping one pattern.' }),
-    ]));
-  }
+  // --- arrangement ---------------------------------------------------------
+  if (kit.patterns.length) wrap.appendChild(arrangement(kit, rerender));
 
   // --- drum layer ----------------------------------------------------------
   if (kit.pads.length) {
@@ -188,6 +163,86 @@ export function renderSong(root, rerender) {
   ]));
 
   root.appendChild(wrap);
+}
+
+const ROLE_LABELS = {
+  drop: 'busiest',
+  break: 'sparse',
+  intro: 'quiet start',
+  empty: 'empty',
+  main: null,
+};
+
+/* The song laid out end to end.
+ *
+ * Block width tracks length in bars, so the shape of the arrangement is
+ * visible at a glance rather than having to be read off a list.
+ */
+function arrangement(kit, rerender) {
+  const totalBars = kit.chain.reduce((sum, entry) => {
+    const pattern = kit.patterns.find((p) => p.id === entry.patternId);
+    return sum + (pattern ? pattern.bars * (entry.repeats || 1) : 0);
+  }, 0);
+  const seconds = totalBars * 4 * (60 / kit.bpm);
+
+  const blocks = kit.chain.map((entry, index) => {
+    const pattern = kit.patterns.find((p) => p.id === entry.patternId);
+    if (!pattern) return null;
+    const bars = pattern.bars * (entry.repeats || 1);
+    const colorIndex = kit.patterns.indexOf(pattern);
+    const roleLabel = ROLE_LABELS[pattern.role] || null;
+
+    return el('div', {
+      class: `arr-block${kit.patterns.length && state.getUi().patternId === pattern.id ? ' is-current' : ''}`,
+      style: {
+        '--pad-color': padColor(colorIndex),
+        flexGrow: String(bars),
+      },
+    }, [
+      el('button', {
+        class: 'arr-head',
+        type: 'button',
+        title: 'Edit this section on the Steps tab',
+        onClick: () => state.setUi({ patternId: pattern.id, tab: 'steps' }),
+      }, [
+        el('strong', { text: pattern.name }),
+        el('span', { class: 'muted', text: `${bars} bar${bars === 1 ? '' : 's'}` }),
+      ]),
+      roleLabel ? el('span', { class: 'arr-role', text: roleLabel }) : null,
+      el('div', { class: 'arr-controls' }, [
+        button('◀', () => state.moveChainEntry(index, -1),
+          { class: 'btn btn-tiny', disabled: index === 0, 'aria-label': 'Move earlier' }),
+        el('input', {
+          type: 'number', min: 1, max: 32, value: entry.repeats || 1, class: 'repeats-input',
+          title: 'How many times this section plays',
+          onChange: (e) => state.setChainRepeats(index, parseInt(e.target.value, 10) || 1),
+        }),
+        button('▶', () => state.moveChainEntry(index, 1),
+          { class: 'btn btn-tiny', disabled: index === kit.chain.length - 1, 'aria-label': 'Move later' }),
+        button('⧉', () => state.duplicateChainEntry(index),
+          { class: 'btn btn-tiny', 'aria-label': 'Duplicate' }),
+        button('✕', () => state.removeFromChain(index),
+          { class: 'btn btn-tiny btn-danger', 'aria-label': 'Remove' }),
+      ]),
+    ]);
+  }).filter(Boolean);
+
+  return section('Arrangement', [
+    kit.chain.length
+      ? el('div', { class: 'arrangement' }, blocks)
+      : el('p', { class: 'muted', text: 'The song is empty. Add a section below.' }),
+    el('div', { class: 'row row-wrap' }, [
+      ...kit.patterns.map((p) => button(`+ ${p.name}`, () => state.addToChain(p.id),
+        { class: 'btn btn-small' })),
+      el('div', { class: 'spacer' }),
+      el('span', { class: 'muted', text: `${totalBars} bars · ${formatTime(seconds)}` }),
+    ]),
+    el('p', {
+      class: 'hint',
+      text: 'Detected from what you played — repeated sections were recognised and merged. '
+        + 'Tap a section to edit it on the Steps tab; set the transport to Song to hear the whole thing.',
+    }),
+  ]);
 }
 
 function savedKitsList(rerender) {

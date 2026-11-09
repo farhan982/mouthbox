@@ -14,6 +14,7 @@ import { classify } from './classify.js';
 import { inferTempo, buildPattern } from './tempo.js';
 import { defaultPad } from './engine.js';
 import { suggestDrum } from './drums.js';
+import { arrange } from './arrange.js';
 
 /* Hats shouldn't ring over each other; everything else should. */
 function chokeFor(name) {
@@ -104,7 +105,7 @@ export function commit(result, bank) {
     return pad;
   });
 
-  const pattern = {
+  const full = {
     ...result.pattern,
     id: 'pat1',
     name: 'A',
@@ -117,9 +118,16 @@ export function commit(result, bank) {
     })),
   };
 
+  // The whole performance as one grid is unusable past a few bars, so it is
+  // cut into the sections it was actually played in, with the order it was
+  // played in as the chain.
+  const { patterns, chain, sectionBars, blocks } = arrange(full);
+
   return {
     pads,
-    pattern,
+    patterns,
+    chain,
+    fullPattern: full,
     samples,
     tempo: result.tempo,
     takeInfo: {
@@ -128,6 +136,10 @@ export function commit(result, bank) {
       bpm: result.tempo.bpm,
       confidence: result.tempo.confidence,
       padCount: pads.length,
+      bars: full.bars,
+      sectionBars,
+      sectionCount: patterns.length,
+      blocks,
     },
   };
 }
